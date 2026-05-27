@@ -61,7 +61,7 @@
             border: none;
             border-radius: 10px;
             cursor: pointer;
-            display: none; /* Escondido por padrão */
+            display: none; 
             z-index: 20;
             pointer-events: all;
             box-shadow: 0 0 20px rgba(255,0,0,0.8);
@@ -148,6 +148,18 @@
     <script type="module">
         import * as THREE from 'three';
 
+        // --- SISTEMA DE ÁUDIO ---
+        const somFase = new Audio('oh-my-god-meme.mp3');
+        const somAtkNormal = new Audio('win10-error.mp3');
+        const somAtkEspecial = new Audio('luigi-good-choice.mp3');
+        const somFim = new Audio('brasil-sil-sil.mp3');
+
+        function tocarSom(audioObj) {
+            audioObj.currentTime = 0; // Reinicia o som se já estiver tocando
+            // O catch previne erros no console caso o navegador bloqueie áudio antes da primeira interação do usuário
+            audioObj.play().catch(e => console.log("Aguardando interação do usuário para tocar sons."));
+        }
+
         // --- Variáveis Globais de Estado ---
         let bossHP = 1000;
         let playerHP = 100;
@@ -188,9 +200,8 @@
         // Texturas
         const textureLoader = new THREE.TextureLoader();
         const bossTexture = textureLoader.load('Well.jpg'); 
-        const coffeeTexture = textureLoader.load('Coffee.jpeg'); // Nova textura de café
+        const coffeeTexture = textureLoader.load('Coffee.jpeg');
 
-        // Guardar as cores originais para podermos voltar ao normal depois da Fúria
         const corLadoNormal = new THREE.Color(0x333333);
         const corFrenteNormal = new THREE.Color(0xffffff);
 
@@ -207,29 +218,27 @@
 
         // --- CÉREBRO DA IA DO WELLINGTON ---
         setInterval(() => {
-            // Se o jogo está rolando e ele não está atacando, ele decide atacar
             if (!isGameOver && bossState === 0 && bossHP > 0 && playerHP > 0) {
                 const sorteio = Math.random();
                 if (sorteio > 0.5) iniciarAtaque1();
                 else iniciarAtaque2();
             }
-        }, 4000); // Tenta um ataque a cada 4 segundos
+        }, 4000); 
 
         function iniciarAtaque1() {
             bossState = 1;
-            // Cresce 50%
             boss.scale.set(1.5, 1.5, 1.5);
-            // Fica "50% mais vermelho" manipulando a cor dos materiais
             materiaisCubo.forEach(mat => mat.color.lerp(new THREE.Color(0xff0000), 0.5));
+            tocarSom(somFase);
         }
 
         function iniciarAtaque2() {
             bossState = 2;
-            framesCooldownAtaque2 = 0; // Zera o contador para atirar café
+            framesCooldownAtaque2 = 0; 
+            tocarSom(somFase);
         }
 
         function checarInterrupcaoBoss() {
-            // Regra: Parar 5s (Ataque 1) ou 3s (Ataque 2) *depois de levar um ataque*
             if (bossState === 1) {
                 clearTimeout(timerParaPararAtaque);
                 timerParaPararAtaque = setTimeout(voltarAoNormal, 5000);
@@ -243,12 +252,11 @@
             if (isGameOver) return;
             bossState = 0;
             boss.scale.set(1, 1, 1);
-            // Restaura cores
             materiaisCubo.forEach((mat, index) => {
-                if(index === 4) mat.color.set(corFrenteNormal); // Frente
-                else mat.color.set(corLadoNormal); // Lados
+                if(index === 4) mat.color.set(corFrenteNormal);
+                else mat.color.set(corLadoNormal);
             });
-            boss.rotation.x = 0; // Corrige o eixo X se ele estava no ataque do café
+            boss.rotation.x = 0; 
         }
 
         // --- SISTEMA DE DANO DO JOGADOR ---
@@ -258,12 +266,11 @@
             playerHP -= dano;
             document.getElementById('player-hp').innerText = Math.max(0, Math.floor(playerHP));
 
-            // Efeito de Tela Vermelha
             document.body.classList.add('tomando-dano');
             clearTimeout(flashTimer);
             flashTimer = setTimeout(() => {
                 document.body.classList.remove('tomando-dano');
-            }, 150); // Pisca por 150ms
+            }, 150);
 
             if (playerHP <= 0) perdedor();
         }
@@ -309,18 +316,19 @@
             mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
             raycaster.setFromCamera(mouse, camera);
-            const intersects = raycaster.intersectObjects([boss]); // Foco apenas no boss
+            const intersects = raycaster.intersectObjects([boss]);
 
             if (intersects.length > 0) {
                 const pontoImpacto = intersects[0].point;
 
-                // Engatilha a interrupção dos ataques do Boss
                 checarInterrupcaoBoss();
 
                 if (teclasPressionadas.p && cargaP >= 100) {
                     jatoAtivo = true; tempoJato = 60; cargaP = 0;
                     document.getElementById('special-bar').style.width = '0%';
                     document.getElementById('bar-container').classList.remove('ready');
+                    
+                    tocarSom(somAtkEspecial); // Áudio Especial Jato
                     return; 
                 }
 
@@ -345,29 +353,23 @@
             }
         }
 
-        // Função para criar fumaça procedural ou projéteis de café
         function emitirParticulaBoss(tipo) {
             if (tipo === 'fumaca') {
                 const geo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
                 const mat = new THREE.MeshBasicMaterial({ color: 0x444444, transparent: true, opacity: 0.8 });
                 const p = new THREE.Mesh(geo, mat);
                 
-                // Nasce em posições aleatórias ao redor do cubo expandido
                 p.position.set(boss.position.x + (Math.random()-0.5)*3, boss.position.y + (Math.random()-0.5)*3, boss.position.z + (Math.random()-0.5)*3);
-                
-                // Fumaça sobe lentamente e se dissipa
                 p.userData = { velocidade: new THREE.Vector3((Math.random()-0.5)*0.05, 0.05 + Math.random()*0.05, (Math.random()-0.5)*0.05), vidaUtil: 1.0, isBossAtk: 'fumaca' };
                 scene.add(p); particulasBoss.push(p);
             } 
             else if (tipo === 'cafe') {
-                // Criação do projétil de café em todas as direções
                 const geo = new THREE.PlaneGeometry(0.6, 0.6);
                 const mat = new THREE.MeshBasicMaterial({ map: coffeeTexture, side: THREE.DoubleSide, transparent: true });
                 
                 for(let i=0; i<8; i++){
                     const p = new THREE.Mesh(geo, mat);
                     p.position.copy(boss.position);
-                    // Cospe projéteis para frente (Z+) em direção à câmera
                     p.userData = { 
                         velocidade: new THREE.Vector3((Math.random()-0.5)*0.3, (Math.random()-0.5)*0.3, 0.1 + Math.random()*0.1), 
                         vidaUtil: 2.0, 
@@ -380,12 +382,18 @@
 
         function levarDanoBoss() {
             let danoFinal = 20;
+            let usouEspecial = false;
 
             if (teclasPressionadas.o) {
                 velocidadeRotacaoO += 0.15; danoFinal = 20;
+                usouEspecial = true; // Ataque furacão conta como som especial
             } else {
                 danoFinal = 20 * proximoMultiplicador;
-                if (proximoMultiplicador > 1) proximoMultiplicador = 1;
+                
+                if (proximoMultiplicador > 1) {
+                    usouEspecial = true; // Descarregou combo pesado
+                    proximoMultiplicador = 1; 
+                }
 
                 if (teclasPressionadas.c) {
                     comboContador++;
@@ -394,12 +402,16 @@
                     container.style.transform = 'scale(1.2)';
                     setTimeout(() => { if(teclasPressionadas.c) container.style.transform = 'scale(1)'; }, 50);
                 } else {
-                    if(bossState !== 2) { // Não rotaciona no eixo Y se ele já estiver rotacionando no X para chover café
+                    if(bossState !== 2) { 
                         isSpinning = true;
                         targetRotation = boss.rotation.y + Math.PI * 2;
                     }
                 }
             }
+
+            // Decide qual som tocar neste golpe
+            if (usouEspecial) tocarSom(somAtkEspecial);
+            else tocarSom(somAtkNormal);
 
             bossHP -= danoFinal;
             document.getElementById('hp').innerText = Math.max(0, bossHP);
@@ -413,8 +425,8 @@
             document.getElementById('score-player').innerText = scorePlayer;
             document.getElementById('boss-name').innerText = "WELLINGTON DERROTADO!";
             limparBatalha();
+            tocarSom(somFim);
             
-            // Animação de sumiço
             let intervalo = setInterval(() => {
                 boss.scale.subScalar(0.05); boss.position.y -= 0.1;
                 if (boss.scale.x <= 0) {
@@ -431,6 +443,8 @@
             document.getElementById('score-boss').innerText = scoreBoss;
             document.getElementById('boss-name').innerText = "GAME OVER, você entrou no podtec mauá fatorial";
             limparBatalha();
+            tocarSom(somFim);
+            
             document.getElementById('btn-restart').style.display = 'block';
         }
 
@@ -452,7 +466,6 @@
             boss.position.set(0,0,0); boss.rotation.set(0,0,0);
             voltarAoNormal();
             
-            // Limpa partículas da tela
             particulasBoss.forEach(p => scene.remove(p)); particulasBoss.length = 0;
             document.getElementById('btn-restart').style.display = 'none';
         });
@@ -478,16 +491,14 @@
                 if(p.userData.isBossAtk === 'fumaca') {
                     p.userData.vidaUtil -= 0.02;
                     p.material.opacity = p.userData.vidaUtil;
-                    p.scale.addScalar(0.02); // Fumaça expande
+                    p.scale.addScalar(0.02); 
                 } else if(p.userData.isBossAtk === 'cafe') {
-                    // Rotaciona o café enquanto ele voa
                     p.rotation.z += 0.1;
                     p.userData.vidaUtil -= 0.01;
                     
-                    // Se o café passou da câmera (bateu no jogador virtualmente)
                     if(p.position.z >= camera.position.z - 0.5) {
-                        sofrerDanoJogador(10); // Toma 10 de dano
-                        p.userData.vidaUtil = 0; // Força deleção
+                        sofrerDanoJogador(2); // DANO DO CAFÉ NERFADO DE 10 PARA 2
+                        p.userData.vidaUtil = 0; 
                     }
                 }
 
@@ -495,29 +506,25 @@
             }
 
             if (!isGameOver) {
-                // --- LÓGICA DE ATAQUE 1 (FÚRIA PROCEDURAL) ---
                 if (bossState === 1) {
-                    sofrerDanoJogador(0.1); // Dano procedural por frame (aprox 6 por segundo)
-                    if(Math.random() > 0.6) emitirParticulaBoss('fumaca'); // Solta fumaça loucamente
-                    // Tremor no Boss
+                    sofrerDanoJogador(0.1); 
+                    if(Math.random() > 0.6) emitirParticulaBoss('fumaca'); 
                     boss.position.x = (Math.random() - 0.5) * 0.2;
                     boss.position.y = (Math.random() - 0.5) * 0.2;
                 } 
-                // --- LÓGICA DE ATAQUE 2 (CAFÉ ROTATIVO) ---
                 else if (bossState === 2) {
-                    boss.rotation.x += 0.1; // Rotaciona de cima pra baixo (Eixo X)
+                    boss.rotation.x += 0.1; 
                     framesCooldownAtaque2++;
-                    // A cada 60 frames (~1 segundo), dispara onda de café
                     if (framesCooldownAtaque2 >= 60) {
                         emitirParticulaBoss('cafe');
                         framesCooldownAtaque2 = 0;
                     }
                 } 
                 else if (bossState === 0) {
-                    boss.position.set(0,0,0); // Garante que parou de tremer
+                    boss.position.set(0,0,0); 
                 }
 
-                // Especiais do Jogador (P e O)
+                // Especiais do Jogador
                 if (teclasPressionadas.p && cargaP < 100) {
                     cargaP += 1.5; cargaP = Math.min(100, cargaP);
                     document.getElementById('special-bar').style.width = cargaP + '%';
@@ -544,12 +551,11 @@
                     if (bossHP <= 0) vitoria();
                 }
 
-                // Animação de Rotação Padrão 
                 if (isSpinning && !teclasPressionadas.o && bossState !== 2) {
                     boss.rotation.y += 0.2;
                     if (boss.rotation.y >= targetRotation) { boss.rotation.y = targetRotation; isSpinning = false; }
                 } else if (bossState === 0 && velocidadeRotacaoO === 0 && !jatoAtivo) {
-                    boss.rotation.x = Math.sin(Date.now() * 0.001) * 0.1; // Respiração suave apenas se estiver Normal
+                    boss.rotation.x = Math.sin(Date.now() * 0.001) * 0.1; 
                 }
             }
 
