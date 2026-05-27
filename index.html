@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VsWellington - A Batalha Final</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #111;
+            user-select: none;
+            transition: background-color 0.1s;
+        }
+        
+        /* Efeito visual quando o jogador toma dano */
+        body.tomando-dano * {
+            color: #ff0000 !important;
+            text-shadow: 0 0 15px #ff0000 !important;
+        }
+
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            text-align: center;
+            pointer-events: none;
+            z-index: 10;
+            width: 100%;
+        }
+        h1 { margin: 0; font-size: 2.5rem; text-shadow: 0 0 10px rgba(255,0,0,0.5); }
+        p { margin: 5px 0; font-size: 1.2rem; }
+        
+        /* Layout do Placar e Vidas */
+        #status-container {
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            width: 80%;
+            margin: 10px auto;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 10px;
+            border: 1px solid #444;
+        }
+        .hp-jogador { color: #00ffcc; text-shadow: 0 0 10px rgba(0,255,204,0.5); font-weight: bold;}
+        .placar { font-size: 1.5rem; color: #ffd700; font-weight: bold; }
+
+        #btn-restart {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 15px 30px;
+            font-size: 1.5rem;
+            background: #ff0000;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            display: none; /* Escondido por padrão */
+            z-index: 20;
+            pointer-events: all;
+            box-shadow: 0 0 20px rgba(255,0,0,0.8);
+            font-weight: bold;
+        }
+        #btn-restart:hover { background: #cc0000; transform: translate(-50%, -50%) scale(1.1); }
+
+        #instrucoes {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #aaa;
+            text-align: center;
+            font-size: 0.9rem;
+            pointer-events: none;
+        }
+        .tecla-foco { color: #fff; font-weight: bold; background: #333; padding: 2px 6px; border-radius: 4px; }
+
+        #bar-container {
+            position: absolute;
+            bottom: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 200px;
+            height: 20px;
+            background: #222;
+            border: 2px solid #555;
+            border-radius: 10px;
+            overflow: hidden;
+            display: none;
+        }
+        #special-bar {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, #00d2ff 0%, #0066ff 100%);
+            transition: width 0.05s linear;
+        }
+        #bar-container.ready #special-bar { background: linear-gradient(90deg, #00ffcc 0%, #00ff66 100%); }
+
+        #combo-container {
+            position: absolute;
+            top: 40%;
+            left: 10%;
+            color: #ffcc00;
+            font-size: 3rem;
+            font-weight: bold;
+            font-style: italic;
+            opacity: 0;
+            transform: scale(0.5);
+            transition: opacity 0.2s, transform 0.1s;
+        }
+        #combo-container.active { opacity: 1; transform: scale(1); }
+        #combo-container.expired { color: #ff3300; transform: scale(1.3); opacity: 0; transition: opacity 0.5s, transform 0.5s; }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <h1 id="boss-name">WELLINGTON</h1>
+        
+        <div id="status-container">
+            <div class="hp-jogador"> Liberdade (Você): <span id="player-hp">100</span> / 100 </div>
+            <div class="placar"> JOGADOR <span id="score-player">0</span> x <span id="score-boss">0</span> WELLINGTON </div>
+            <div> Vida do Boss: <span id="hp">1000</span> / 1000 </div>
+        </div>
+    </div>
+
+    <button id="btn-restart">TENTAR NOVAMENTE</button>
+
+    <div id="bar-container"><div id="special-bar"></div></div>
+    <div id="combo-container">COMBO <span id="combo-hits">0</span>x</div>
+
+    <div id="instrucoes">
+        Segure <span class="tecla-foco">P</span>: Carregar Jato | 
+        Segure <span class="tecla-foco">O</span>: Modo Furacão | 
+        Segure <span class="tecla-foco">C</span>: Acumular Combo Manual
+    </div>
+
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- Variáveis Globais de Estado ---
+        let bossHP = 1000;
+        let playerHP = 100;
+        let scorePlayer = 0;
+        let scoreBoss = 0;
+        let isGameOver = false;
+
+        // Boss Actions
+        let isSpinning = false;
+        let targetRotation = 0;
+        let bossState = 0; // 0: Normal, 1: Fúria (Cresce+Fumaça), 2: Café (Giro Top-Down)
+        let timerParaPararAtaque = null;
+        let framesCooldownAtaque2 = 0;
+
+        // Combos e Teclas
+        const teclasPressionadas = { p: false, o: false, c: false };
+        let cargaP = 0, jatoAtivo = false, tempoJato = 0;
+        let velocidadeRotacaoO = 0;
+        let comboContador = 0, proximoMultiplicador = 1;
+        
+        const particulas = [];
+        const particulasBoss = []; // Efeitos gerados pelo boss contra nós
+
+        // Configuração Three.js
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 5;
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(2, 2, 5);
+        scene.add(directionalLight);
+
+        // Texturas
+        const textureLoader = new THREE.TextureLoader();
+        const bossTexture = textureLoader.load('Well.jpg'); 
+        const coffeeTexture = textureLoader.load('Coffee.jpeg'); // Nova textura de café
+
+        // Guardar as cores originais para podermos voltar ao normal depois da Fúria
+        const corLadoNormal = new THREE.Color(0x333333);
+        const corFrenteNormal = new THREE.Color(0xffffff);
+
+        const materialPadrao = new THREE.MeshStandardMaterial({ color: corLadoNormal.getHex() });
+        const materialFrente = new THREE.MeshStandardMaterial({ map: bossTexture, color: corFrenteNormal.getHex() });
+
+        const materiaisCubo = [materialPadrao, materialPadrao, materialPadrao, materialPadrao, materialFrente, materialPadrao];
+        const geometry = new THREE.BoxGeometry(2, 2, 2);
+        const boss = new THREE.Mesh(geometry, materiaisCubo);
+        scene.add(boss);
+
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        // --- CÉREBRO DA IA DO WELLINGTON ---
+        setInterval(() => {
+            // Se o jogo está rolando e ele não está atacando, ele decide atacar
+            if (!isGameOver && bossState === 0 && bossHP > 0 && playerHP > 0) {
+                const sorteio = Math.random();
+                if (sorteio > 0.5) iniciarAtaque1();
+                else iniciarAtaque2();
+            }
+        }, 4000); // Tenta um ataque a cada 4 segundos
+
+        function iniciarAtaque1() {
+            bossState = 1;
+            // Cresce 50%
+            boss.scale.set(1.5, 1.5, 1.5);
+            // Fica "50% mais vermelho" manipulando a cor dos materiais
+            materiaisCubo.forEach(mat => mat.color.lerp(new THREE.Color(0xff0000), 0.5));
+        }
+
+        function iniciarAtaque2() {
+            bossState = 2;
+            framesCooldownAtaque2 = 0; // Zera o contador para atirar café
+        }
+
+        function checarInterrupcaoBoss() {
+            // Regra: Parar 5s (Ataque 1) ou 3s (Ataque 2) *depois de levar um ataque*
+            if (bossState === 1) {
+                clearTimeout(timerParaPararAtaque);
+                timerParaPararAtaque = setTimeout(voltarAoNormal, 5000);
+            } else if (bossState === 2) {
+                clearTimeout(timerParaPararAtaque);
+                timerParaPararAtaque = setTimeout(voltarAoNormal, 3000);
+            }
+        }
+
+        function voltarAoNormal() {
+            if (isGameOver) return;
+            bossState = 0;
+            boss.scale.set(1, 1, 1);
+            // Restaura cores
+            materiaisCubo.forEach((mat, index) => {
+                if(index === 4) mat.color.set(corFrenteNormal); // Frente
+                else mat.color.set(corLadoNormal); // Lados
+            });
+            boss.rotation.x = 0; // Corrige o eixo X se ele estava no ataque do café
+        }
+
+        // --- SISTEMA DE DANO DO JOGADOR ---
+        let flashTimer = null;
+        function sofrerDanoJogador(dano) {
+            if (isGameOver) return;
+            playerHP -= dano;
+            document.getElementById('player-hp').innerText = Math.max(0, Math.floor(playerHP));
+
+            // Efeito de Tela Vermelha
+            document.body.classList.add('tomando-dano');
+            clearTimeout(flashTimer);
+            flashTimer = setTimeout(() => {
+                document.body.classList.remove('tomando-dano');
+            }, 150); // Pisca por 150ms
+
+            if (playerHP <= 0) perdedor();
+        }
+
+        // --- CONTROLES E INPUTS ---
+        window.addEventListener('keydown', (e) => {
+            if(isGameOver) return;
+            const tecla = e.key.toLowerCase();
+            if (tecla in teclasPressionadas && !teclasPressionadas[tecla]) {
+                teclasPressionadas[tecla] = true;
+                if (tecla === 'p') document.getElementById('bar-container').style.display = 'block';
+                if (tecla === 'c') {
+                    document.getElementById('combo-container').className = "active";
+                    document.getElementById('combo-hits').innerText = comboContador;
+                }
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            const tecla = e.key.toLowerCase();
+            if (tecla in teclasPressionadas) {
+                teclasPressionadas[tecla] = false;
+                if (tecla === 'p') {
+                    cargaP = 0;
+                    document.getElementById('special-bar').style.width = '0%';
+                    document.getElementById('bar-container').style.display = 'none';
+                    document.getElementById('bar-container').classList.remove('ready');
+                }
+                if (tecla === 'c') {
+                    if (comboContador > 1) {
+                        proximoMultiplicador = comboContador;
+                        document.getElementById('combo-container').className = "expired";
+                    } else document.getElementById('combo-container').className = "";
+                    comboContador = 0; 
+                }
+            }
+        });
+
+        window.addEventListener('mousedown', (event) => {
+            if(isGameOver || event.target.id === 'btn-restart') return;
+
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects([boss]); // Foco apenas no boss
+
+            if (intersects.length > 0) {
+                const pontoImpacto = intersects[0].point;
+
+                // Engatilha a interrupção dos ataques do Boss
+                checarInterrupcaoBoss();
+
+                if (teclasPressionadas.p && cargaP >= 100) {
+                    jatoAtivo = true; tempoJato = 60; cargaP = 0;
+                    document.getElementById('special-bar').style.width = '0%';
+                    document.getElementById('bar-container').classList.remove('ready');
+                    return; 
+                }
+
+                if (isSpinning && !teclasPressionadas.o) return;
+
+                criarEfeitoImpacto(pontoImpacto);
+                levarDanoBoss();
+            }
+        });
+
+        function criarEfeitoImpacto(ponto, quantidade = 30, forcaJato = false) {
+            const geoParticula = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+            const cores = forcaJato ? [0x00ffff, 0x0088ff, 0xffffff] : [0xff0000]; 
+
+            for (let i = 0; i < quantidade; i++) {
+                const p = new THREE.Mesh(geoParticula, new THREE.MeshBasicMaterial({ color: cores[Math.floor(Math.random() * cores.length)] }));
+                p.position.copy(ponto);
+                let velX = (Math.random() - 0.5) * 0.2; let velY = (Math.random() - 0.5) * 0.2; let velZ = (Math.random() * 0.1) + 0.05;
+                if (forcaJato) { velX *= 2.5; velY *= 2.5; velZ = (Math.random() * 0.3) + 0.15; }
+                p.userData = { velocidade: new THREE.Vector3(velX, velY, velZ), vidaUtil: 1.0, isBossAtk: false };
+                scene.add(p); particulas.push(p);
+            }
+        }
+
+        // Função para criar fumaça procedural ou projéteis de café
+        function emitirParticulaBoss(tipo) {
+            if (tipo === 'fumaca') {
+                const geo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+                const mat = new THREE.MeshBasicMaterial({ color: 0x444444, transparent: true, opacity: 0.8 });
+                const p = new THREE.Mesh(geo, mat);
+                
+                // Nasce em posições aleatórias ao redor do cubo expandido
+                p.position.set(boss.position.x + (Math.random()-0.5)*3, boss.position.y + (Math.random()-0.5)*3, boss.position.z + (Math.random()-0.5)*3);
+                
+                // Fumaça sobe lentamente e se dissipa
+                p.userData = { velocidade: new THREE.Vector3((Math.random()-0.5)*0.05, 0.05 + Math.random()*0.05, (Math.random()-0.5)*0.05), vidaUtil: 1.0, isBossAtk: 'fumaca' };
+                scene.add(p); particulasBoss.push(p);
+            } 
+            else if (tipo === 'cafe') {
+                // Criação do projétil de café em todas as direções
+                const geo = new THREE.PlaneGeometry(0.6, 0.6);
+                const mat = new THREE.MeshBasicMaterial({ map: coffeeTexture, side: THREE.DoubleSide, transparent: true });
+                
+                for(let i=0; i<8; i++){
+                    const p = new THREE.Mesh(geo, mat);
+                    p.position.copy(boss.position);
+                    // Cospe projéteis para frente (Z+) em direção à câmera
+                    p.userData = { 
+                        velocidade: new THREE.Vector3((Math.random()-0.5)*0.3, (Math.random()-0.5)*0.3, 0.1 + Math.random()*0.1), 
+                        vidaUtil: 2.0, 
+                        isBossAtk: 'cafe' 
+                    };
+                    scene.add(p); particulasBoss.push(p);
+                }
+            }
+        }
+
+        function levarDanoBoss() {
+            let danoFinal = 20;
+
+            if (teclasPressionadas.o) {
+                velocidadeRotacaoO += 0.15; danoFinal = 20;
+            } else {
+                danoFinal = 20 * proximoMultiplicador;
+                if (proximoMultiplicador > 1) proximoMultiplicador = 1;
+
+                if (teclasPressionadas.c) {
+                    comboContador++;
+                    document.getElementById('combo-hits').innerText = comboContador;
+                    const container = document.getElementById('combo-container');
+                    container.style.transform = 'scale(1.2)';
+                    setTimeout(() => { if(teclasPressionadas.c) container.style.transform = 'scale(1)'; }, 50);
+                } else {
+                    if(bossState !== 2) { // Não rotaciona no eixo Y se ele já estiver rotacionando no X para chover café
+                        isSpinning = true;
+                        targetRotation = boss.rotation.y + Math.PI * 2;
+                    }
+                }
+            }
+
+            bossHP -= danoFinal;
+            document.getElementById('hp').innerText = Math.max(0, bossHP);
+            if (bossHP <= 0) vitoria();
+        }
+
+        // --- FINAIS DE JOGO E RESTART ---
+        function vitoria() {
+            isGameOver = true;
+            scorePlayer++;
+            document.getElementById('score-player').innerText = scorePlayer;
+            document.getElementById('boss-name').innerText = "WELLINGTON DERROTADO!";
+            limparBatalha();
+            
+            // Animação de sumiço
+            let intervalo = setInterval(() => {
+                boss.scale.subScalar(0.05); boss.position.y -= 0.1;
+                if (boss.scale.x <= 0) {
+                    clearInterval(intervalo);
+                    boss.visible = false;
+                    document.getElementById('btn-restart').style.display = 'block';
+                }
+            }, 16);
+        }
+
+        function perdedor() {
+            isGameOver = true;
+            scoreBoss++;
+            document.getElementById('score-boss').innerText = scoreBoss;
+            document.getElementById('boss-name').innerText = "GAME OVER, você entrou no podtec mauá fatorial";
+            limparBatalha();
+            document.getElementById('btn-restart').style.display = 'block';
+        }
+
+        function limparBatalha() {
+            teclasPressionadas.p = teclasPressionadas.o = teclasPressionadas.c = false;
+            document.getElementById('combo-container').style.display = 'none';
+            document.getElementById('bar-container').style.display = 'none';
+            bossState = 0;
+            clearTimeout(timerParaPararAtaque);
+        }
+
+        document.getElementById('btn-restart').addEventListener('click', () => {
+            bossHP = 1000; playerHP = 100;
+            document.getElementById('hp').innerText = bossHP;
+            document.getElementById('player-hp').innerText = playerHP;
+            document.getElementById('boss-name').innerText = "WELLINGTON";
+            
+            isGameOver = false; boss.visible = true;
+            boss.position.set(0,0,0); boss.rotation.set(0,0,0);
+            voltarAoNormal();
+            
+            // Limpa partículas da tela
+            particulasBoss.forEach(p => scene.remove(p)); particulasBoss.length = 0;
+            document.getElementById('btn-restart').style.display = 'none';
+        });
+
+        // --- LOOP DE RENDERIZAÇÃO ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Gerencia partículas do Jogador
+            for (let i = particulas.length - 1; i >= 0; i--) {
+                const p = particulas[i];
+                p.position.add(p.userData.velocidade);
+                p.userData.vidaUtil -= 0.03;
+                p.scale.setScalar(p.userData.vidaUtil);
+                if (p.userData.vidaUtil <= 0) { scene.remove(p); particulas.splice(i, 1); }
+            }
+
+            // Gerencia partículas/Ataques do Boss contra o Jogador
+            for (let i = particulasBoss.length - 1; i >= 0; i--) {
+                const p = particulasBoss[i];
+                p.position.add(p.userData.velocidade);
+                
+                if(p.userData.isBossAtk === 'fumaca') {
+                    p.userData.vidaUtil -= 0.02;
+                    p.material.opacity = p.userData.vidaUtil;
+                    p.scale.addScalar(0.02); // Fumaça expande
+                } else if(p.userData.isBossAtk === 'cafe') {
+                    // Rotaciona o café enquanto ele voa
+                    p.rotation.z += 0.1;
+                    p.userData.vidaUtil -= 0.01;
+                    
+                    // Se o café passou da câmera (bateu no jogador virtualmente)
+                    if(p.position.z >= camera.position.z - 0.5) {
+                        sofrerDanoJogador(10); // Toma 10 de dano
+                        p.userData.vidaUtil = 0; // Força deleção
+                    }
+                }
+
+                if (p.userData.vidaUtil <= 0) { scene.remove(p); particulasBoss.splice(i, 1); }
+            }
+
+            if (!isGameOver) {
+                // --- LÓGICA DE ATAQUE 1 (FÚRIA PROCEDURAL) ---
+                if (bossState === 1) {
+                    sofrerDanoJogador(0.1); // Dano procedural por frame (aprox 6 por segundo)
+                    if(Math.random() > 0.6) emitirParticulaBoss('fumaca'); // Solta fumaça loucamente
+                    // Tremor no Boss
+                    boss.position.x = (Math.random() - 0.5) * 0.2;
+                    boss.position.y = (Math.random() - 0.5) * 0.2;
+                } 
+                // --- LÓGICA DE ATAQUE 2 (CAFÉ ROTATIVO) ---
+                else if (bossState === 2) {
+                    boss.rotation.x += 0.1; // Rotaciona de cima pra baixo (Eixo X)
+                    framesCooldownAtaque2++;
+                    // A cada 60 frames (~1 segundo), dispara onda de café
+                    if (framesCooldownAtaque2 >= 60) {
+                        emitirParticulaBoss('cafe');
+                        framesCooldownAtaque2 = 0;
+                    }
+                } 
+                else if (bossState === 0) {
+                    boss.position.set(0,0,0); // Garante que parou de tremer
+                }
+
+                // Especiais do Jogador (P e O)
+                if (teclasPressionadas.p && cargaP < 100) {
+                    cargaP += 1.5; cargaP = Math.min(100, cargaP);
+                    document.getElementById('special-bar').style.width = cargaP + '%';
+                    if (cargaP >= 100) document.getElementById('bar-container').classList.add('ready');
+                }
+
+                if (jatoAtivo && bossHP > 0) {
+                    criarEfeitoImpacto(new THREE.Vector3(0, 0, bossState === 1 ? 1.5 : 1), 5, true);
+                    bossHP -= 2; document.getElementById('hp').innerText = Math.max(0, Math.floor(bossHP));
+                    boss.position.x = (Math.random() - 0.5) * 0.1; boss.position.y = (Math.random() - 0.5) * 0.1;
+                    tempoJato--;
+                    if (tempoJato <= 0 || bossHP <= 0) {
+                        jatoAtivo = false; boss.position.set(0,0,0);
+                        if (bossHP <= 0) vitoria();
+                    }
+                }
+
+                if (velocidadeRotacaoO > 0) {
+                    boss.rotation.y += velocidadeRotacaoO;
+                    bossHP -= velocidadeRotacaoO * 2; 
+                    document.getElementById('hp').innerText = Math.max(0, Math.floor(bossHP));
+                    velocidadeRotacaoO *= 0.96; 
+                    if (velocidadeRotacaoO < 0.005) velocidadeRotacaoO = 0;
+                    if (bossHP <= 0) vitoria();
+                }
+
+                // Animação de Rotação Padrão 
+                if (isSpinning && !teclasPressionadas.o && bossState !== 2) {
+                    boss.rotation.y += 0.2;
+                    if (boss.rotation.y >= targetRotation) { boss.rotation.y = targetRotation; isSpinning = false; }
+                } else if (bossState === 0 && velocidadeRotacaoO === 0 && !jatoAtivo) {
+                    boss.rotation.x = Math.sin(Date.now() * 0.001) * 0.1; // Respiração suave apenas se estiver Normal
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
